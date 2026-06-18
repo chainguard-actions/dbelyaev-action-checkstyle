@@ -1,0 +1,24 @@
+name: Test fail_level none always passes
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Run checkstyle with fail_level none (should always pass)
+        id: action
+        uses: .
+        with:
+          github_token: dummy-token
+          workdir: testdata/java
+          checkstyle_config: google_checks.xml
+          level: error
+          reporter: local
+          filter_mode: nofilter
+          # fail_level=none means the action never fails regardless of violations
+          fail_level: none
+      - name: Assert action passed with fail_level none
+        run: |
+          echo "Action completed successfully with fail_level=none"
+          echo "PASS"
