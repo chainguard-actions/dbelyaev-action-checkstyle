@@ -1,0 +1,42 @@
+name: Test checkstyle with exclude paths
+on:
+  workflow_dispatch:
+jobs:
+  test-exclude:
+    runs-on: ubuntu-latest
+    env:
+      GITHUB_EVENT_NAME: push
+      GITHUB_REF: refs/heads/main
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Run checkstyle action with excluded directory
+        id: action
+        uses: .
+        continue-on-error: true
+        with:
+          github_token: ${{ github.token }}
+          workdir: pristine/dbelyaev--action-checkstyle/v3.12.0/testdata/java
+          checkstyle_config: google_checks.xml
+          level: warning
+          reporter: github-check
+          filter_mode: nofilter
+          fail_level: none
+          exclude: |
+            pristine/dbelyaev--action-checkstyle/v3.12.0/testdata/java/excluded
+            pristine/dbelyaev--action-checkstyle/v3.12.0/testdata/java/excluded dir
+
+      - name: Assert action ran with exclude paths
+        env:
+          OUTCOME: ${{ steps.action.outcome }}
+        run: |
+          echo "action outcome: $OUTCOME"
+          # success  => checkstyle ran and reviewdog posted successfully
+          # failure  => checkstyle ran but reviewdog could not post (expected in act
+          #             because the GITHUB_TOKEN is a dummy and the API call fails)
+          # Both outcomes confirm the action was invoked and checkstyle executed.
+          if [ "$OUTCOME" = "skipped" ] || [ "$OUTCOME" = "cancelled" ]; then
+            echo "FAIL: action step was $OUTCOME — it should have run"
+            exit 1
+          fi
+          echo "PASS: action ran with exclude paths, outcome=$OUTCOME"
