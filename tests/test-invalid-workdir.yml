@@ -1,0 +1,39 @@
+name: Test invalid workdir causes graceful failure
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+
+      - id: action
+        uses: .
+        continue-on-error: true
+        with:
+          github_token: ${{ github.token }}
+          # Non-existent workdir should cause the action to fail
+          workdir: this/directory/does/not/exist
+          level: info
+          reporter: github-check
+          filter_mode: nofilter
+          fail_level: none
+          checkstyle_config: google_checks.xml
+
+      - name: Assert action failed due to non-existent workdir
+        env:
+          OUTCOME: ${{ steps.action.outcome }}
+        run: |
+          echo "outcome: $OUTCOME"
+          # The entrypoint uses realpath which fails for non-existent directories
+          if [ "$OUTCOME" = "failure" ]; then
+            echo "PASS: action correctly failed for non-existent workdir"
+          elif [ "$OUTCOME" = "success" ]; then
+            echo "FAIL: action should have failed for non-existent workdir"
+            exit 1
+          else
+            echo "FAIL: unexpected outcome '$OUTCOME'"
+            exit 1
+          fi

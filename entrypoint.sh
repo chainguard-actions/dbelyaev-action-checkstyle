@@ -1,0 +1,209 @@
+#!/bin/sh
+command -v reviewdog >/dev/null 2>&1 || { echo >&2 "reviewdog: not found"; exit 1; }
+
+# shellcheck disable=SC3040 # pipefail is supported by Alpine ash used in this Docker image
+set -eo pipefail
+
+# GitHub Actions overrides HOME to /github/home (owned by root).
+# Restore the writable home directory created for our non-root user.
+export HOME=/home/checkstyle
+
+# Drop root privileges by switching to the owner of the workspace.
+# The workspace is a bind mount from the GitHub runner; changing ownership
+# (via chown) would affect the host and break subsequent workflow steps.
+# Instead we detect the workspace owner's UID:GID and run as that user so
+# tools like reviewdog can write to .git/ without any chown.
+if [ "$(id -u)" -eq 0 ]; then
+  workspace="${GITHUB_WORKSPACE:-.}"
+  if owner_uidgid="$(stat -c '%u:%g' "$workspace" 2>/dev/null)"; then
+    owner_uid="${owner_uidgid%%:*}"
+    if [ "$owner_uid" != "0" ]; then
+      # Make container-internal writable dirs accessible to the detected UID
+      chown -R "$owner_uidgid" /home/checkstyle /opt/lib
+      exec su-exec "$owner_uidgid" "$0" "$@"
+    else
+      # Workspace owned by root (UID 0:*); fall back to non-root default user
+      exec su-exec checkstyle "$0" "$@"
+    fi
+  else
+    # stat failed; fall back to non-root default user
+    exec su-exec checkstyle "$0" "$@"
+  fi
+fi
+
+# output some information
+{ echo "Pre-installed"; java -jar /opt/lib/checkstyle.jar --version; } | sed ':a;N;s/\n/ /;ba'
+
+if [ -n "${GITHUB_WORKSPACE}" ]; then
+  cd "${GITHUB_WORKSPACE}" || exit
+  git config --global --add safe.directory "${GITHUB_WORKSPACE}" || exit 1
+fi
+
+# resolve workdir to canonical absolute path so that Java's File.getAbsolutePath()
+# produces clean paths (without "./") that match the exclude patterns exactly
+if [ -n "${INPUT_WORKDIR}" ]; then
+  orig_workdir="${INPUT_WORKDIR}"
+  if ! resolved_workdir="$(realpath "${orig_workdir}" 2>/dev/null)"; then
+    echo "workdir does not exist: ${orig_workdir}" >&2
+    exit 1
+  fi
+  INPUT_WORKDIR="${resolved_workdir}"
+fi
+
+# build optional checkstyle arguments safely using positional parameters
+set --
+
+# user supplied custom properties file parameter
+if [ -n "${INPUT_PROPERTIES_FILE}" ]; then
+  set -- "$@" -p "${INPUT_PROPERTIES_FILE}"
+fi
+
+# user supplied exclude paths, build -e flags for checkstyle
+if [ -n "${INPUT_EXCLUDE}" ]; then
+  while IFS= read -r dir; do
+    dir="$(printf '%s' "$dir" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+    if [ -n "$dir" ]; then
+      # resolve to absolute path for reliable matching
+      resolved="$(realpath "$dir" 2>/dev/null)" || {
+        # realpath failed (dir doesn't exist yet); build absolute path manually
+        case "$dir" in
+          /*) resolved="$dir" ;;
+          *)
+            # normalize: strip leading "./" and collapse redundant slashes
+            normalized="$(printf '%s' "$dir" | sed -e 's#^\(\./\)*##' -e 's#/\+#/#g')"
+            resolved="${GITHUB_WORKSPACE:-$(pwd)}"
+            resolved="${resolved%/}/$normalized"
+            ;;
+        esac
+      }
+      set -- "$@" -e "$resolved"
+    fi
+  done <<EOF
+${INPUT_EXCLUDE}
+EOF
+fi
+
+# user wants to use custom Checkstyle version, try to install it
+if [ -n "${INPUT_CHECKSTYLE_VERSION}" ]; then
+  echo '::group::📥 Installing user-defined Checkstyle version ... https://github.com/checkstyle/checkstyle'
+
+  # The version is interpolated into a download URL, so it must be a plain
+  # version number and nothing else. Without this check, path traversal in the
+  # value rewrites the URL to any path on github.com - "../../../owner/repo/
+  # releases/download/v1/evil.jar" resolves to an attacker-controlled artifact
+  # that is then executed by `java -jar`.
+  case "${INPUT_CHECKSTYLE_VERSION}" in
+    *[!0-9.]* | .* | *. | *..*)
+      echo "Invalid checkstyle_version: '${INPUT_CHECKSTYLE_VERSION}'. Expected a version number such as 10.21.0" >&2
+      exit 1
+      ;;
+    *)
+      # Digits and dots only, no leading/trailing/doubled dot: accepted.
+      # Spelled out rather than left to fall through, so the accept path is
+      # visible and cannot be mistaken for an oversight.
+      ;;
+  esac
+
+  url="https://github.com/checkstyle/checkstyle/releases/download/checkstyle-${INPUT_CHECKSTYLE_VERSION}/checkstyle-${INPUT_CHECKSTYLE_VERSION}-all.jar"
+
+  echo "Custom Checkstyle version has been configured: 'v${INPUT_CHECKSTYLE_VERSION}', try to download from ${url}"
+  # -4 forces IPv4 to work around intermittent IPv6 routing issues on GitHub Actions runners.
+  # --proto/--proto-redir pin the scheme to HTTPS for the request AND every
+  # redirect: GitHub redirects release downloads, and this JAR is executed by
+  # `java -jar` afterwards, so a downgrade to plain http on that hop would let
+  # whoever controls it decide what code runs. wget offers no equivalent
+  # guarantee (--https-only only governs recursive mode), which is why this
+  # uses curl. --connect-timeout rather than --max-time: the latter caps the
+  # whole transfer and a 17 MB JAR on a slow runner would hit it.
+  if ! curl -4 -fsSL --proto '=https' --proto-redir '=https' --retry 3 --connect-timeout 30 \
+      -o /opt/lib/checkstyle.jar "$url"; then
+    echo "Failed to download Checkstyle version ${INPUT_CHECKSTYLE_VERSION}" >&2
+    exit 1
+  fi
+
+  # Verify the downloaded JAR is valid by running a quick version check.
+  # This catches corrupt/truncated downloads and non-JAR responses (e.g. 404 HTML pages).
+  if ! java -jar /opt/lib/checkstyle.jar --version >/dev/null 2>&1; then
+    echo "Downloaded Checkstyle JAR for version ${INPUT_CHECKSTYLE_VERSION} appears to be corrupt or invalid" >&2
+    exit 1
+  fi
+
+  echo '::endgroup::'
+fi
+
+export REVIEWDOG_GITHUB_API_TOKEN="${INPUT_GITHUB_TOKEN}"
+
+# run check
+echo '::group:: Running Checkstyle with reviewdog 🐶 ...'
+{ echo "Run check with"; java -jar /opt/lib/checkstyle.jar --version; } | sed ':a;N;s/\n/ /;ba'
+
+# Run checkstyle and reviewdog in two stages so that:
+#  1. A hard checkstyle failure (invalid args, exception) is detected and surfaced.
+#  2. Normal violations (exit code = ERROR-level count) are forwarded to reviewdog
+#     which controls the final exit code via its fail-level setting.
+cs_output="$(mktemp)"
+trap 'rm -f "$cs_output"' EXIT
+
+java -jar /opt/lib/checkstyle.jar "${INPUT_WORKDIR}" -c "${INPUT_CHECKSTYLE_CONFIG}" "$@" -f xml \
+  > "$cs_output" || cs_exit=$?
+cs_exit=${cs_exit:-0}
+
+# Checkstyle exits with the number of ERROR-level violations on success.
+# Non-zero special exit codes are:
+#   255 (-1) invalid arguments
+#   254 (-2) internal CheckstyleException
+# Treat only these as hard failures; all other non-zero codes (including large
+# error counts) are passed through to reviewdog.
+# Hard failure only when one of those codes came WITHOUT usable XML output:
+# a repo with exactly 254/255 ERROR-level violations hits the same codes but
+# still produces valid XML, which should flow to reviewdog instead of aborting.
+if { [ "$cs_exit" -eq 255 ] || [ "$cs_exit" -eq 254 ]; } &&
+   { [ ! -s "$cs_output" ] || ! head -n 1 "$cs_output" | grep -q '<'; }; then
+  echo "Checkstyle failed with exit code ${cs_exit}" >&2
+  exit "$cs_exit"
+fi
+
+# Feed checkstyle XML output into reviewdog; its exit code respects fail-level
+# Safely tokenize INPUT_REVIEWDOG_FLAGS via xargs so that shell metacharacters
+# in the value are never interpreted by the shell.  xargs honours single/double
+# quotes and backslash escapes (the same tokenisation the shell would apply to
+# an unquoted expansion) but does NOT evaluate ;, |, &&, $(...), backticks,
+# etc., preventing command injection.
+#
+# Pattern: printf the user value into xargs, which tokenizes it and appends
+# each token as a separate argument to the sh -c wrapper.  The fixed flags are
+# pre-loaded as positional parameters ($1..$N) inside the wrapper; xargs
+# appends the user tokens after them.  reviewdog reads the checkstyle XML from
+# the cs_output file (not from stdin, so xargs can own stdin for flag input).
+export CS_OUT="$cs_output"  # exported so the sh -c subshell can read it
+if [ -n "${INPUT_REVIEWDOG_FLAGS}" ]; then
+  # xargs tokenizes INPUT_REVIEWDOG_FLAGS (honouring quotes/backslashes) and
+  # appends each token as a separate argument after the fixed flags.
+  # Inside the sh -c wrapper, "$@" expands to: fixed flags + user tokens.
+  # reviewdog reads the checkstyle XML from $CS_OUT (not stdin) so that
+  # xargs can own stdin for its own flag-reading.
+  printf '%s' "${INPUT_REVIEWDOG_FLAGS}" \
+    | xargs sh -c \
+        'reviewdog "$@" < "$CS_OUT"' \
+        _ \
+        "-f=checkstyle" \
+        "-name=checkstyle" \
+        "-reporter=${INPUT_REPORTER:-github-pr-check}" \
+        "-filter-mode=${INPUT_FILTER_MODE:-added}" \
+        "-fail-level=${INPUT_FAIL_LEVEL:-none}" \
+        "-level=${INPUT_LEVEL}" \
+    || rd_exit=$?
+else
+  reviewdog \
+    -f=checkstyle \
+    -name="checkstyle" \
+    "-reporter=${INPUT_REPORTER:-github-pr-check}" \
+    "-filter-mode=${INPUT_FILTER_MODE:-added}" \
+    "-fail-level=${INPUT_FAIL_LEVEL:-none}" \
+    "-level=${INPUT_LEVEL}" \
+    < "$cs_output" || rd_exit=$?
+fi
+rd_exit=${rd_exit:-0}
+
+echo '::endgroup::'
+exit "$rd_exit"

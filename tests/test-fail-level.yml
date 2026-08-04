@@ -1,0 +1,41 @@
+name: Test fail_level causes failure on violations
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+
+      - id: action
+        uses: .
+        continue-on-error: true
+        with:
+          github_token: ${{ github.token }}
+          workdir: action/testdata/java
+          level: info
+          reporter: github-check
+          filter_mode: nofilter
+          # fail_level=info means any info-level violation causes failure
+          fail_level: info
+          checkstyle_config: google_checks.xml
+
+      - name: Assert action failed (violations found with fail_level=info, or sentinel repo)
+        env:
+          OUTCOME: ${{ steps.action.outcome }}
+        run: |
+          echo "outcome: $OUTCOME"
+          # The testdata Java file has checkstyle violations, so with fail_level=info
+          # the action should fail. It may also fail due to the sentinel repo.
+          # Either way, failure is the expected outcome here.
+          if [ "$OUTCOME" = "failure" ]; then
+            echo "PASS: action failed as expected (violations detected or sentinel repo)"
+          elif [ "$OUTCOME" = "success" ]; then
+            echo "FAIL: expected action to fail due to violations with fail_level=info"
+            exit 1
+          else
+            echo "FAIL: unexpected outcome '$OUTCOME'"
+            exit 1
+          fi
