@@ -1,0 +1,39 @@
+name: Test checkstyle fail_level behavior
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+
+      - name: Set up git origin reachable inside the Docker container
+        run: |
+          git config user.email "test@example.com"
+          git config user.name "Test User"
+          rm -rf "$GITHUB_WORKSPACE/.git-remote"
+          git init --bare "$GITHUB_WORKSPACE/.git-remote"
+          git push "$GITHUB_WORKSPACE/.git-remote" HEAD:refs/heads/act-harness
+          git remote set-url origin "$GITHUB_WORKSPACE/.git-remote" 2>/dev/null || \
+            git remote add origin "$GITHUB_WORKSPACE/.git-remote"
+
+      - name: Run checkstyle with fail_level=error and warning-level violations
+        id: action
+        uses: .
+        with:
+          github_token: ${{ github.token }}
+          workdir: tests/fixtures/java-violations
+          checkstyle_config: google_checks.xml
+          reporter: local
+          filter_mode: nofilter
+          # fail_level=error means only ERROR-level violations cause failure
+          # google_checks reports at warning level by default, so this should pass
+          fail_level: error
+          level: warning
+
+      - name: Assert action did not fail (warning violations below error fail_level)
+        run: |
+          echo "Action completed without failure - warning violations did not trigger error fail_level"
+          echo "PASS"

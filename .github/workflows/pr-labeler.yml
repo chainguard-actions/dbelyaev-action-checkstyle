@@ -1,0 +1,57 @@
+name: PR Labeler
+
+on:
+  pull_request_target: # zizmor: ignore[dangerous-triggers] safe usage, no code checkout, API-only actions
+    types: [ opened, synchronize ]
+
+# set empty default permissions and define them explicitly in each job for security
+permissions: {}
+
+jobs:
+
+  label-pr-size:
+    name: Label PR size
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    permissions:
+      contents: read # to calculate PR diff size
+      pull-requests: write # to add size labels and post warning comments (codelytv/pr-size-labeler)
+
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        with:
+          egress-policy: audit
+
+      - uses: codelytv/pr-size-labeler@095a41fca88b8764fd9e008ad269bcdb82bb38b9 # v1.10.4
+        with:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          xs_max_size: '10'
+          s_max_size: '50'
+          m_max_size: '100'
+          l_max_size: '1000'
+          fail_if_xl: 'false'
+          message_if_xl: >
+            This PR exceeds the recommended size of 1000 lines.
+            Please make sure you are NOT addressing multiple issues with one PR.
+            Note this PR might be rejected due to its size.
+
+  label-pr-changes:
+    name: Label PR changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    permissions:
+      contents: read # to read .github/labeler.yml config and checkout repository
+      pull-requests: write # to add/sync labels based on changed file paths (actions/labeler)
+
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        with:
+          egress-policy: audit
+
+      - uses: actions/labeler@f27b608878404679385c85cfa523b85ccb86e213 # v6.1.0
+        with:
+          sync-labels: true

@@ -139,14 +139,36 @@ if [ "$cs_exit" -eq 255 ] || [ "$cs_exit" -eq 254 ]; then
 fi
 
 # Feed checkstyle XML output into reviewdog; its exit code respects fail-level
-# shellcheck disable=SC2086
-reviewdog -f=checkstyle \
+# Build the fixed reviewdog arguments as positional parameters so each flag is
+# a separate, properly-quoted shell word with no risk of metacharacter injection.
+set -- \
+    -f=checkstyle \
     -name="checkstyle" \
     -reporter="${INPUT_REPORTER:-github-pr-check}" \
     -filter-mode="${INPUT_FILTER_MODE:-added}" \
     -fail-level="${INPUT_FAIL_LEVEL:-none}" \
-    -level="${INPUT_LEVEL}" \
-    ${INPUT_REVIEWDOG_FLAGS} < "$cs_output" || rd_exit=$?
+    -level="${INPUT_LEVEL}"
+
+# Append user-supplied extra flags.  xargs splits the string on shell quoting
+# rules (handles single/double quotes and backslash escapes) and passes each
+# token as a separate argument to the inline sh, which appends it to the
+# positional-parameter list.  Because xargs does NOT invoke a shell to
+# interpret the tokens, shell metacharacters (;, |, &, $(...), etc.) in the
+# input are treated as literal characters and cannot cause injection.
+if [ -n "${INPUT_REVIEWDOG_FLAGS}" ]; then
+  # Use a temp file so we can safely append to "$@" inside the current shell.
+  _rd_flags_file="$(mktemp)"
+  # shellcheck disable=SC2064
+  trap "rm -f \"$cs_output\" \"$_rd_flags_file\"" EXIT
+  # xargs -n1 prints one token per line; each line is a safe, literal flag.
+  printf '%s' "${INPUT_REVIEWDOG_FLAGS}" | xargs -n1 > "$_rd_flags_file" 2>/dev/null || true
+  while IFS= read -r _flag; do
+    [ -n "$_flag" ] && set -- "$@" "$_flag"
+  done < "$_rd_flags_file"
+  rm -f "$_rd_flags_file"
+fi
+
+reviewdog "$@" < "$cs_output" || rd_exit=$?
 rd_exit=${rd_exit:-0}
 
 echo '::endgroup::'
