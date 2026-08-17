@@ -1,0 +1,187 @@
+name: Test - Other
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+
+# set empty default permissions and define them explicitly in each job for security
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+
+  test-reviewdog-flags:
+    if: github.event_name == 'pull_request'
+    name: runner / checkstyle (reviewdog-flags)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@a5ad31d6a139d249332a2605b85202e8c0b78450 # v2.19.1
+        with:
+          egress-policy: audit
+
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: ./
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          reviewdog_flags: -filter-mode=added -fail-level=none
+          exclude: |
+            testdata/java/excluded
+            testdata/java/excluded dir
+
+  test-properties-file:
+    if: github.event_name == 'pull_request'
+    name: runner / checkstyle (properties_file)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@a5ad31d6a139d249332a2605b85202e8c0b78450 # v2.19.1
+        with:
+          egress-policy: audit
+
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: ./
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          workdir: ./testdata/java/
+          checkstyle_config: ./testdata/properties_file/test_checks.xml
+          properties_file: ./testdata/properties_file/additional.properties
+          exclude: |
+            testdata/java/excluded
+            testdata/java/excluded dir
+
+  test-exclude:
+    if: github.event_name == 'pull_request'
+    name: runner / checkstyle (exclude)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@a5ad31d6a139d249332a2605b85202e8c0b78450 # v2.19.1
+        with:
+          egress-policy: audit
+
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: ./
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          reporter: github-pr-check
+          fail_level: error
+          exclude: |
+            testdata/java/excluded
+            testdata/java/excluded dir
+
+  test-exclude-multi:
+    if: github.event_name == 'pull_request'
+    name: runner / checkstyle (exclude-multi)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@a5ad31d6a139d249332a2605b85202e8c0b78450 # v2.19.1
+        with:
+          egress-policy: audit
+
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: ./
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          reporter: github-pr-check
+          fail_level: error
+          exclude: |
+            testdata/java/excluded
+            testdata/java/excluded dir
+            .github
+
+  test-exclude-space:
+    if: github.event_name == 'pull_request'
+    name: runner / checkstyle (exclude-space)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@a5ad31d6a139d249332a2605b85202e8c0b78450 # v2.19.1
+        with:
+          egress-policy: audit
+
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: ./
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          reporter: github-pr-check
+          fail_level: error
+          exclude: |
+            testdata/java/excluded
+            testdata/java/excluded dir
+
+  test-invalid-config:
+    if: github.event_name == 'pull_request'
+    name: runner / checkstyle (invalid-config)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@a5ad31d6a139d249332a2605b85202e8c0b78450 # v2.19.1
+        with:
+          egress-policy: audit
+
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Run with invalid config (expect failure)
+        id: invalid_config
+        continue-on-error: true
+        uses: ./
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          checkstyle_config: nonexistent_config.xml
+
+      - name: Verify failure
+        if: steps.invalid_config.outcome != 'failure'
+        env:
+          STEP_OUTCOME: ${{ steps.invalid_config.outcome }}
+        run: |
+          echo "Expected failure but got: $STEP_OUTCOME"
+          exit 1
+
+  test-invalid-version:
+    if: github.event_name == 'pull_request'
+    name: runner / checkstyle (invalid-version)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@a5ad31d6a139d249332a2605b85202e8c0b78450 # v2.19.1
+        with:
+          egress-policy: audit
+
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Run with invalid version (expect failure)
+        id: invalid_version
+        continue-on-error: true
+        uses: ./
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          checkstyle_version: "999.0.0"
+
+      - name: Verify failure
+        if: steps.invalid_version.outcome != 'failure'
+        env:
+          STEP_OUTCOME: ${{ steps.invalid_version.outcome }}
+        run: |
+          echo "Expected failure but got: $STEP_OUTCOME"
+          exit 1

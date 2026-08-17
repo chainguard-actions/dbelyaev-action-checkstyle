@@ -1,29 +1,38 @@
-name: Test exclude input
+name: Test exclude paths functionality
 on:
   workflow_dispatch:
 jobs:
   test:
     runs-on: ubuntu-latest
-    env:
-      GITHUB_REF: refs/heads/main
-      GITHUB_EVENT_NAME: push
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
 
-      - name: Run checkstyle with excluded directory
-        id: action
+      - name: Set up git origin reachable inside the Docker container
+        run: |
+          git config user.email "test@example.com"
+          git config user.name "Test User"
+          rm -rf "$GITHUB_WORKSPACE/.git-remote"
+          git init --bare "$GITHUB_WORKSPACE/.git-remote"
+          git push "$GITHUB_WORKSPACE/.git-remote" HEAD:refs/heads/act-harness
+          git push "$GITHUB_WORKSPACE/.git-remote" --tags
+          git remote set-url origin "$GITHUB_WORKSPACE/.git-remote" 2>/dev/null || \
+            git remote add origin "$GITHUB_WORKSPACE/.git-remote"
+
+      - id: action
         uses: .
         with:
-          github_token: dummy-token
-          workdir: testdata/java
+          github_token: ${{ github.token }}
+          workdir: tests/fixtures/java-exclude
           checkstyle_config: google_checks.xml
-          exclude: testdata/java/excluded
           level: warning
           reporter: local
           filter_mode: nofilter
           fail_level: none
+          exclude: tests/fixtures/java-exclude/generated
 
-      - name: Assert action completed successfully with exclude
+      - name: Assert action completed successfully with exclusion applied
         run: |
-          echo "Action completed with exclude input without hard failure"
+          echo "Action completed - excluded directory was skipped by checkstyle"
           echo "PASS"

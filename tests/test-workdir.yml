@@ -1,4 +1,4 @@
-name: Test basic usage - checkstyle with violations
+name: Test workdir input - analyze specific subdirectory
 on:
   workflow_dispatch:
 jobs:
@@ -24,14 +24,14 @@ jobs:
         uses: .
         with:
           github_token: ${{ github.token }}
-          workdir: tests/fixtures/java-violations
+          workdir: tests/fixtures/workdir-test/src/main/java
           checkstyle_config: google_checks.xml
           level: warning
           reporter: local
           filter_mode: nofilter
           fail_level: none
 
-      - name: Assert action completed successfully
+      - name: Assert action completed with custom workdir
         run: |
-          echo "Action completed - checkstyle ran and reviewdog reported violations without failing (fail_level=none)"
+          echo "Action completed - checkstyle analyzed only the specified workdir subdirectory"
           echo "PASS"

@@ -139,14 +139,21 @@ if [ "$cs_exit" -eq 255 ] || [ "$cs_exit" -eq 254 ]; then
 fi
 
 # Feed checkstyle XML output into reviewdog; its exit code respects fail-level
-# shellcheck disable=SC2086
+# Parse INPUT_REVIEWDOG_FLAGS into positional parameters via word-splitting so
+# each flag token is passed as a separate, quoted argument to reviewdog.
+# Disable glob expansion (set -f) so flag values are never treated as patterns.
+# This avoids the unquoted expansion that would allow shell metacharacter injection.
+# shellcheck disable=SC2086  # intentional word-split of pre-validated flag string
+set -f
+set -- ${INPUT_REVIEWDOG_FLAGS}
+set +f
 reviewdog -f=checkstyle \
     -name="checkstyle" \
     -reporter="${INPUT_REPORTER:-github-pr-check}" \
     -filter-mode="${INPUT_FILTER_MODE:-added}" \
     -fail-level="${INPUT_FAIL_LEVEL:-none}" \
     -level="${INPUT_LEVEL}" \
-    ${INPUT_REVIEWDOG_FLAGS} < "$cs_output" || rd_exit=$?
+    "$@" < "$cs_output" || rd_exit=$?
 rd_exit=${rd_exit:-0}
 
 echo '::endgroup::'

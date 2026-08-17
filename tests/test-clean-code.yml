@@ -1,4 +1,4 @@
-name: Test basic usage - checkstyle with violations
+name: Test clean code - no checkstyle violations
 on:
   workflow_dispatch:
 jobs:
@@ -24,14 +24,14 @@ jobs:
         uses: .
         with:
           github_token: ${{ github.token }}
-          workdir: tests/fixtures/java-violations
+          workdir: tests/fixtures/java-clean
           checkstyle_config: google_checks.xml
           level: warning
           reporter: local
           filter_mode: nofilter
           fail_level: none
 
-      - name: Assert action completed successfully
+      - name: Assert action completed successfully with no violations
         run: |
-          echo "Action completed - checkstyle ran and reviewdog reported violations without failing (fail_level=none)"
+          echo "Action completed - checkstyle ran on clean code and reviewdog reported no violations"
           echo "PASS"

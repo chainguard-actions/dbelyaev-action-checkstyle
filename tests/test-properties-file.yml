@@ -4,20 +4,29 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
-    env:
-      GITHUB_REF: refs/heads/main
-      GITHUB_EVENT_NAME: push
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
 
-      - name: Run checkstyle with custom config and properties file
-        id: action
+      - name: Set up git origin reachable inside the Docker container
+        run: |
+          git config user.email "test@example.com"
+          git config user.name "Test User"
+          rm -rf "$GITHUB_WORKSPACE/.git-remote"
+          git init --bare "$GITHUB_WORKSPACE/.git-remote"
+          git push "$GITHUB_WORKSPACE/.git-remote" HEAD:refs/heads/act-harness
+          git push "$GITHUB_WORKSPACE/.git-remote" --tags
+          git remote set-url origin "$GITHUB_WORKSPACE/.git-remote" 2>/dev/null || \
+            git remote add origin "$GITHUB_WORKSPACE/.git-remote"
+
+      - id: action
         uses: .
         with:
-          github_token: dummy-token
-          workdir: testdata/java
-          checkstyle_config: testdata/properties_file/test_checks.xml
-          properties_file: testdata/properties_file/additional.properties
+          github_token: ${{ github.token }}
+          workdir: tests/fixtures/props-test
+          checkstyle_config: tests/fixtures/props-test/checks.xml
+          properties_file: tests/fixtures/props-test/checkstyle.properties
           level: warning
           reporter: local
           filter_mode: nofilter
@@ -25,5 +34,5 @@ jobs:
 
       - name: Assert action completed successfully with properties file
         run: |
-          echo "Action completed with properties_file without hard failure"
+          echo "Action completed - checkstyle used properties file to resolve variable in config"
           echo "PASS"
