@@ -1,0 +1,126 @@
+name: Test - Versions
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+
+# set empty default permissions and define them explicitly in each job for security
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+
+  test-custom-checkstyle-version-9:
+    if: github.event_name == 'pull_request'
+    name: runner / checkstyle (v9.0)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@a90bcbc6539c36a85cdfeb73f7e2f433735f215b # v2.15.0
+        with:
+          egress-policy: audit
+
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: ./
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          workdir: ./testdata/java/
+          checkstyle_version: "9.0"
+          exclude: |
+            testdata/java/excluded
+            testdata/java/excluded dir
+
+  test-custom-checkstyle-version-10:
+    if: github.event_name == 'pull_request'
+    name: runner / checkstyle (v10.0)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@a90bcbc6539c36a85cdfeb73f7e2f433735f215b # v2.15.0
+        with:
+          egress-policy: audit
+
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: ./
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          workdir: ./testdata/java/
+          checkstyle_version: "10.0"
+          exclude: |
+            testdata/java/excluded
+            testdata/java/excluded dir
+
+  test-custom-checkstyle-version-11:
+    if: github.event_name == 'pull_request'
+    name: runner / checkstyle (v11.0.0)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@a90bcbc6539c36a85cdfeb73f7e2f433735f215b # v2.15.0
+        with:
+          egress-policy: audit
+
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: ./
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          workdir: ./testdata/java/
+          checkstyle_version: "11.0.0"
+          exclude: |
+            testdata/java/excluded
+            testdata/java/excluded dir
+
+  test-custom-checkstyle-version-12:
+    if: github.event_name == 'pull_request'
+    name: runner / checkstyle (v12.0.0)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@a90bcbc6539c36a85cdfeb73f7e2f433735f215b # v2.15.0
+        with:
+          egress-policy: audit
+
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: ./
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          workdir: ./testdata/java/
+          checkstyle_version: "12.0.0"
+          exclude: |
+            testdata/java/excluded
+            testdata/java/excluded dir
+
+  test-custom-checkstyle-version-13:
+    if: github.event_name == 'pull_request'
+    name: runner / checkstyle (v13.0.0)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@a90bcbc6539c36a85cdfeb73f7e2f433735f215b # v2.15.0
+        with:
+          egress-policy: audit
+
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: ./
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          workdir: ./testdata/java/
+          checkstyle_version: "13.0.0"
+          exclude: |
+            testdata/java/excluded
+            testdata/java/excluded dir

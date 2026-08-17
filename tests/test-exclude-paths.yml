@@ -1,4 +1,4 @@
-name: Test properties_file input
+name: Test exclude paths functionality
 on:
   workflow_dispatch:
 jobs:
@@ -17,20 +17,21 @@ jobs:
           git remote set-url origin "$GITHUB_WORKSPACE/.git-remote" 2>/dev/null || \
             git remote add origin "$GITHUB_WORKSPACE/.git-remote"
 
-      - name: Run checkstyle action with properties file
+      - name: Run checkstyle action with excluded directory
         id: action
         uses: .
         with:
           github_token: ${{ github.token }}
           workdir: tests/fixtures/java
-          checkstyle_config: tests/fixtures/properties_file/test_checks.xml
-          properties_file: tests/fixtures/properties_file/additional.properties
+          checkstyle_config: google_checks.xml
           level: warning
           reporter: local
           filter_mode: nofilter
           fail_level: none
+          exclude: |
+            tests/fixtures/java/excluded
 
-      - name: Assert action completed successfully with properties file
+      - name: Assert action completed successfully with excludes
         run: |
-          echo "Action completed with properties_file without hard failure"
+          echo "Action completed with exclude paths without hard failure"
           echo "PASS"
