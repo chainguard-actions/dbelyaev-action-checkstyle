@@ -139,26 +139,14 @@ if [ "$cs_exit" -eq 255 ] || [ "$cs_exit" -eq 254 ]; then
 fi
 
 # Feed checkstyle XML output into reviewdog; its exit code respects fail-level
-# Parse INPUT_REVIEWDOG_FLAGS safely into positional parameters so that each
-# flag token is passed as a separate, quoted argument to reviewdog.
-# - "set -f" disables glob expansion so that wildcard characters in the value
-#   are never expanded against the filesystem.
-# - Word-splitting on $() is intentional here (splitting on IFS whitespace only)
-#   and is the only shell processing applied; no command substitution or
-#   metacharacter interpretation occurs because the value is not passed through
-#   eval or an unquoted shell expansion that the shell parses as syntax.
-# - "set +f" restores glob expansion afterwards.
-set -f
-# shellcheck disable=SC2046
-set -- $( printf '%s\n' "${INPUT_REVIEWDOG_FLAGS}" )
-set +f
+# shellcheck disable=SC2086
 reviewdog -f=checkstyle \
     -name="checkstyle" \
     -reporter="${INPUT_REPORTER:-github-pr-check}" \
     -filter-mode="${INPUT_FILTER_MODE:-added}" \
     -fail-level="${INPUT_FAIL_LEVEL:-none}" \
     -level="${INPUT_LEVEL}" \
-    "$@" < "$cs_output" || rd_exit=$?
+    ${INPUT_REVIEWDOG_FLAGS} < "$cs_output" || rd_exit=$?
 rd_exit=${rd_exit:-0}
 
 echo '::endgroup::'

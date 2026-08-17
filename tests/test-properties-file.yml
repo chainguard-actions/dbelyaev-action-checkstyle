@@ -1,4 +1,4 @@
-name: Test checkstyle with custom workdir
+name: Test checkstyle with properties file
 on:
   workflow_dispatch:
 jobs:
@@ -17,19 +17,20 @@ jobs:
           git remote set-url origin "$GITHUB_WORKSPACE/.git-remote" 2>/dev/null || \
             git remote add origin "$GITHUB_WORKSPACE/.git-remote"
 
-      - name: Run checkstyle with workdir pointing to fixture java subdir
+      - name: Run checkstyle with custom config and properties file
         id: action
         uses: .
         with:
           github_token: ${{ github.token }}
           workdir: tests/fixtures/java
-          checkstyle_config: google_checks.xml
-          level: info
+          checkstyle_config: tests/fixtures/properties_file/test_checks.xml
+          properties_file: tests/fixtures/properties_file/additional.properties
+          level: warning
           reporter: local
           filter_mode: nofilter
           fail_level: none
 
-      - name: Assert action completed successfully with custom workdir
+      - name: Assert action completed successfully with properties file
         run: |
-          echo "Action completed with custom workdir without hard failure"
+          echo "Action completed with properties file without hard failure"
           echo "PASS"
