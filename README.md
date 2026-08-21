@@ -24,6 +24,7 @@ Hardened by [Chainguard](https://www.chainguard.dev) from the upstream action at
 | v3.8.2 | [`v3.8.2`](https://github.com/chainguard-actions/dbelyaev-action-checkstyle/tree/v3.8.2) | [`1df550c`](https://github.com/dbelyaev/action-checkstyle/commit/1df550cf7ca173631075cd649bbc52cfa6549cbd) |
 | v3.9 | [`v3.9`](https://github.com/chainguard-actions/dbelyaev-action-checkstyle/tree/v3.9) | [`485ad21`](https://github.com/dbelyaev/action-checkstyle/commit/485ad216fe923c76647504c1923c23bcd3447458) |
 | v3.9.0 | [`v3.9.0`](https://github.com/chainguard-actions/dbelyaev-action-checkstyle/tree/v3.9.0) | [`485ad21`](https://github.com/dbelyaev/action-checkstyle/commit/485ad216fe923c76647504c1923c23bcd3447458) |
+| v4.0.0 | [`v4.0.0`](https://github.com/chainguard-actions/dbelyaev-action-checkstyle/tree/v4.0.0) | [`53cc62a`](https://github.com/dbelyaev/action-checkstyle/commit/53cc62a6210f59d6424ef3cc9a34091ad497af29) |
 
 ## Privacy
 
