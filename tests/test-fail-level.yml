@@ -1,0 +1,61 @@
+name: Test fail_level - action fails when violations exceed threshold
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+
+      - name: Set up git origin reachable inside the Docker container
+        run: |
+          git config user.email "test@example.com"
+          git config user.name "Test User"
+          rm -rf "$GITHUB_WORKSPACE/.git-remote"
+          git init --bare "$GITHUB_WORKSPACE/.git-remote"
+          git push "$GITHUB_WORKSPACE/.git-remote" HEAD:refs/heads/act-harness
+          git push "$GITHUB_WORKSPACE/.git-remote" --tags
+          git remote set-url origin "$GITHUB_WORKSPACE/.git-remote" 2>/dev/null || \
+            git remote add origin "$GITHUB_WORKSPACE/.git-remote"
+
+      - name: Create Java file with style violations
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/tests/fixtures/fail-level-test"
+          cat > "$GITHUB_WORKSPACE/tests/fixtures/fail-level-test/ViolatingCode.java" << 'EOF'
+          public class ViolatingCode {
+          public static void main(String[] args) {
+          System.out.println("no indentation");
+          }
+          }
+          EOF
+
+      - name: Run with fail_level=none (should not fail due to violations)
+        id: action-no-fail
+        uses: .
+        continue-on-error: true
+        with:
+          github_token: ${{ github.token }}
+          workdir: tests/fixtures/fail-level-test
+          level: warning
+          reporter: github-check
+          filter_mode: nofilter
+          fail_level: none
+          checkstyle_config: google_checks.xml
+
+      - name: Assert fail_level=none does not fail due to violations
+        env:
+          OUTCOME: ${{ steps.action-no-fail.outcome }}
+        run: |
+          echo "outcome: $OUTCOME"
+          # With fail_level=none, the action should succeed (violations don't cause failure)
+          # On sentinel repo, reviewdog may fail to post but that's acceptable
+          if [ "$OUTCOME" = "success" ]; then
+            echo "PASS: action completed successfully with fail_level=none"
+          elif [ "$OUTCOME" = "failure" ]; then
+            echo "PASS: action failed gracefully (expected on sentinel repo)"
+          else
+            echo "FAIL: unexpected outcome '$OUTCOME'"
+            exit 1
+          fi

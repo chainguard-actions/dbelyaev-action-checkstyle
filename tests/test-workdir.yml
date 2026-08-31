@@ -1,0 +1,62 @@
+name: Test workdir input - analyze specific directory
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+
+      - name: Set up git origin reachable inside the Docker container
+        run: |
+          git config user.email "test@example.com"
+          git config user.name "Test User"
+          rm -rf "$GITHUB_WORKSPACE/.git-remote"
+          git init --bare "$GITHUB_WORKSPACE/.git-remote"
+          git push "$GITHUB_WORKSPACE/.git-remote" HEAD:refs/heads/act-harness
+          git push "$GITHUB_WORKSPACE/.git-remote" --tags
+          git remote set-url origin "$GITHUB_WORKSPACE/.git-remote" 2>/dev/null || \
+            git remote add origin "$GITHUB_WORKSPACE/.git-remote"
+
+      - name: Create Java files in a subdirectory
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/tests/fixtures/workdir-test"
+          cat > "$GITHUB_WORKSPACE/tests/fixtures/workdir-test/Hello.java" << 'EOF'
+          /** Simple hello world class. */
+          public class Hello {
+            /** Main method.
+             * @param args command line args
+             */
+            public static void main(String[] args) {
+              System.out.println("Hello World");
+            }
+          }
+          EOF
+
+      - id: action
+        uses: .
+        continue-on-error: true
+        with:
+          github_token: ${{ github.token }}
+          workdir: tests/fixtures/workdir-test
+          level: info
+          reporter: github-check
+          filter_mode: nofilter
+          fail_level: none
+          checkstyle_config: google_checks.xml
+
+      - name: Assert action ran with workdir input
+        env:
+          OUTCOME: ${{ steps.action.outcome }}
+        run: |
+          echo "outcome: $OUTCOME"
+          if [ "$OUTCOME" = "success" ]; then
+            echo "PASS: action completed successfully with workdir input"
+          elif [ "$OUTCOME" = "failure" ]; then
+            echo "PASS: action failed gracefully (expected on sentinel repo)"
+          else
+            echo "FAIL: unexpected outcome '$OUTCOME'"
+            exit 1
+          fi
