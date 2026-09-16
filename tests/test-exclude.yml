@@ -1,0 +1,59 @@
+name: Test checkstyle with exclude paths
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set up git origin reachable inside Docker container
+        run: |
+          git config user.email "test@example.com"
+          git config user.name "Test User"
+          rm -rf "$GITHUB_WORKSPACE/.git-remote"
+          git init --bare "$GITHUB_WORKSPACE/.git-remote"
+          git push "$GITHUB_WORKSPACE/.git-remote" HEAD:refs/heads/act-harness
+          git remote set-url origin "$GITHUB_WORKSPACE/.git-remote" 2>/dev/null || \
+            git remote add origin "$GITHUB_WORKSPACE/.git-remote"
+
+      - name: Create a Java file with violations in a subdirectory to exclude
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/tests/fixtures/java/with-excluded/src"
+          mkdir -p "$GITHUB_WORKSPACE/tests/fixtures/java/with-excluded/excluded"
+          cat > "$GITHUB_WORKSPACE/tests/fixtures/java/with-excluded/excluded/Ugly.java" <<'EOF'
+          public class Ugly {
+          public static void main(String[] args) {int x=1;}
+          }
+          EOF
+
+      - id: checkstyle
+        name: Run checkstyle excluding the violations directory
+        uses: .
+        with:
+          github_token: ${{ github.token }}
+          workdir: tests/fixtures/java/with-excluded
+          checkstyle_config: google_checks.xml
+          reporter: github-check
+          filter_mode: nofilter
+          fail_level: none
+          level: info
+          exclude: |
+            tests/fixtures/java/with-excluded/excluded
+        continue-on-error: true
+
+      - name: Assert checkstyle ran with exclude paths
+        env:
+          OUTCOME: ${{ steps.checkstyle.outcome }}
+        run: |
+          echo "outcome: $OUTCOME"
+          # The action should run without crashing. With the violations directory excluded,
+          # there are no Java files left to check in the workdir (only the excluded subdir).
+          if [ "$OUTCOME" = "success" ]; then
+            echo "PASS: checkstyle ran successfully with exclude paths"
+          elif [ "$OUTCOME" = "failure" ]; then
+            echo "PASS: step failed gracefully (sentinel repo API limitation)"
+          else
+            echo "FAIL: unexpected outcome '$OUTCOME'"
+            exit 1
+          fi

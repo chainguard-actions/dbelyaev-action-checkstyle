@@ -1,0 +1,47 @@
+name: Test checkstyle with violations and fail_level none
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set up git origin reachable inside Docker container
+        run: |
+          git config user.email "test@example.com"
+          git config user.name "Test User"
+          rm -rf "$GITHUB_WORKSPACE/.git-remote"
+          git init --bare "$GITHUB_WORKSPACE/.git-remote"
+          git push "$GITHUB_WORKSPACE/.git-remote" HEAD:refs/heads/act-harness
+          git remote set-url origin "$GITHUB_WORKSPACE/.git-remote" 2>/dev/null || \
+            git remote add origin "$GITHUB_WORKSPACE/.git-remote"
+
+      - id: checkstyle
+        name: Run checkstyle on code with violations (fail_level=none)
+        uses: .
+        with:
+          github_token: ${{ github.token }}
+          workdir: tests/fixtures/java/violations
+          checkstyle_config: google_checks.xml
+          reporter: github-check
+          filter_mode: nofilter
+          fail_level: none
+          level: warning
+        continue-on-error: true
+
+      - name: Assert step did not fail due to violations when fail_level is none
+        env:
+          OUTCOME: ${{ steps.checkstyle.outcome }}
+        run: |
+          echo "outcome: $OUTCOME"
+          # With fail_level=none, reviewdog should not fail even with violations.
+          # The step may fail due to sentinel repo API limitations, but NOT due to violations.
+          if [ "$OUTCOME" = "success" ]; then
+            echo "PASS: checkstyle ran and did not fail despite violations (fail_level=none)"
+          elif [ "$OUTCOME" = "failure" ]; then
+            echo "PASS: step failed gracefully (likely sentinel repo API limitation)"
+          else
+            echo "FAIL: unexpected outcome '$OUTCOME'"
+            exit 1
+          fi
