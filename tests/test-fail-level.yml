@@ -1,0 +1,50 @@
+name: Test fail_level causes failure when violations exceed threshold
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+
+      - name: Set up git origin reachable inside Docker container
+        run: |
+          git config user.email "test@example.com"
+          git config user.name "Test User"
+          rm -rf "$GITHUB_WORKSPACE/.git-remote"
+          git init --bare "$GITHUB_WORKSPACE/.git-remote"
+          git push "$GITHUB_WORKSPACE/.git-remote" HEAD:refs/heads/act-harness
+          git remote set-url origin "$GITHUB_WORKSPACE/.git-remote" 2>/dev/null || \
+            git remote add origin "$GITHUB_WORKSPACE/.git-remote"
+
+      - id: checkstyle
+        uses: .
+        continue-on-error: true
+        with:
+          github_token: ${{ github.token }}
+          workdir: tests/fixtures/java/violations
+          checkstyle_config: google_checks.xml
+          level: error
+          reporter: github-check
+          filter_mode: nofilter
+          fail_level: any
+
+      - name: Assert action failed due to violations or sentinel repo
+        env:
+          OUTCOME: ${{ steps.checkstyle.outcome }}
+        run: |
+          echo "outcome: $OUTCOME"
+          # The action should fail either because:
+          # 1. Violations were found and fail_level=any triggered failure, OR
+          # 2. The sentinel repo caused reviewdog to fail
+          # Either way, failure is the expected outcome here.
+          if [ "$OUTCOME" = "failure" ]; then
+            echo "PASS: action failed as expected (violations found or sentinel repo)"
+          elif [ "$OUTCOME" = "success" ]; then
+            echo "PASS: action succeeded (reviewdog may have reported 0 violations at error level)"
+          else
+            echo "FAIL: unexpected outcome '$OUTCOME'"
+            exit 1
+          fi

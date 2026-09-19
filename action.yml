@@ -1,0 +1,63 @@
+name: "Java Checkstyle Reviewer"
+# description should be no more than 125 characters!
+description: "Enforce Java code standards in PRs with inline feedback. Powered by Checkstyle + reviewdog for GitHub integration."
+author: "Dmitriy Belyaev"
+inputs:
+  github_token:
+    description: "GitHub token for API authentication. Use secrets.GITHUB_TOKEN for automatic authentication."
+    default: "${{ github.token }}"
+  workdir:
+    description: "Working directory for Checkstyle analysis, relative to the repository root."
+    default: "."
+  ### Flags for reviewdog ###
+  level:
+    description: "Severity level for reported violations [info, warning, error]. Affects GitHub status check results."
+    default: "info"
+  reporter:
+    description: "How reviewdog reports violations [github-pr-check, github-check, github-pr-review]. See reviewdog documentation for details."
+    default: "github-pr-check"
+  filter_mode:
+    description: |
+      Filtering mode for reviewdog [added, diff_context, file, nofilter].
+      Controls which files/lines are analyzed. See reviewdog documentation for details.
+    default: "added"
+  fail_level:
+    description: |
+      When to fail the workflow [none, any, info, warning, error].
+      Set to fail when violations at or above the specified severity are found. Default 'none' never fails.
+    default: "none"
+  reviewdog_flags:
+    description: "Additional flags to pass to the reviewdog command."
+    default: ""
+  ### Flags for checkstyle ###
+  checkstyle_config:
+    description: |
+      Checkstyle ruleset to apply during analysis.
+      Built-in: google_checks.xml (Google Java Style), sun_checks.xml (Sun Code Conventions).
+      Or provide path to custom config file relative to repository root.
+    default: "google_checks.xml"
+  checkstyle_version:
+    description: |
+      Checkstyle version to use for analysis. See https://github.com/checkstyle/checkstyle/releases/
+      Default: latest version (automatically updated).
+      RECOMMENDED: Pin to a specific version in production to ensure consistent builds.
+    default: ""
+  properties_file:
+    description: |
+      Path to properties file (relative to repository root) for defining variables in Checkstyle config.
+      Use standard Java properties format (key=value) to centralize configuration values.
+    default: ""
+  exclude:
+    description: |
+      Newline-separated list of directories or files to exclude from Checkstyle analysis.
+      Paths are relative to the repository root. Uses Checkstyle's native -e flag.
+      Subdirectories of excluded paths are also excluded.
+    default: ""
+runs:
+  using: "docker"
+  image: "Dockerfile"
+
+# Ref: https://haya14busa.github.io/github-action-brandings/
+branding:
+  icon: "check"
+  color: "green"
