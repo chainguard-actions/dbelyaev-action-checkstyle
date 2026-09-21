@@ -19,6 +19,7 @@ Hardened by [Chainguard](https://www.chainguard.dev) from the upstream action at
 | v3.13.0 | [`v3.13.0`](https://github.com/chainguard-actions/dbelyaev-action-checkstyle/tree/v3.13.0) | [`b6b8609`](https://github.com/dbelyaev/action-checkstyle/commit/b6b8609a79ad233bda08bdcf7c08a8f3d4e39a96) |
 | v3.14 | [`v3.14`](https://github.com/chainguard-actions/dbelyaev-action-checkstyle/tree/v3.14) | [`203f0e8`](https://github.com/dbelyaev/action-checkstyle/commit/203f0e85ad07e412c4f2b9bb4df1f9edfad9757f) |
 | v3.14.0 | [`v3.14.0`](https://github.com/chainguard-actions/dbelyaev-action-checkstyle/tree/v3.14.0) | [`203f0e8`](https://github.com/dbelyaev/action-checkstyle/commit/203f0e85ad07e412c4f2b9bb4df1f9edfad9757f) |
+| v3.15.0 | [`v3.15.0`](https://github.com/chainguard-actions/dbelyaev-action-checkstyle/tree/v3.15.0) | [`ada3d54`](https://github.com/dbelyaev/action-checkstyle/commit/ada3d54c61a086e8d8348886a212c4a2a9411e3c) |
 | v3.8 | [`v3.8`](https://github.com/chainguard-actions/dbelyaev-action-checkstyle/tree/v3.8) | [`3ed2d37`](https://github.com/dbelyaev/action-checkstyle/commit/3ed2d37bb726987ef8587f962afcd3f55564f780) |
 | v3.8.1 | [`v3.8.1`](https://github.com/chainguard-actions/dbelyaev-action-checkstyle/tree/v3.8.1) | [`3ed2d37`](https://github.com/dbelyaev/action-checkstyle/commit/3ed2d37bb726987ef8587f962afcd3f55564f780) |
 | v3.8.2 | [`v3.8.2`](https://github.com/chainguard-actions/dbelyaev-action-checkstyle/tree/v3.8.2) | [`1df550c`](https://github.com/dbelyaev/action-checkstyle/commit/1df550cf7ca173631075cd649bbc52cfa6549cbd) |
