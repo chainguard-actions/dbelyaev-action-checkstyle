@@ -164,23 +164,14 @@ if { [ "$cs_exit" -eq 255 ] || [ "$cs_exit" -eq 254 ]; } &&
 fi
 
 # Feed checkstyle XML output into reviewdog; its exit code respects fail-level
-# INPUT_REVIEWDOG_FLAGS is a user-supplied list of extra flags. We tokenize it
-# via xargs (which honours quotes and backslashes but does NOT interpret shell
-# operators such as ; | & $(...)) and prepend the fixed flags so that reviewdog
-# receives each token as a separate argument without any shell injection risk.
-# stdin is redirected from $cs_output via file-descriptor 3 so that xargs can
-# still use its own stdin for the flag list.
-exec 3< "$cs_output"
-printf '%s' "$INPUT_REVIEWDOG_FLAGS" \
-  | xargs reviewdog \
-      -f=checkstyle \
-      -name="checkstyle" \
-      -reporter="${INPUT_REPORTER:-github-pr-check}" \
-      -filter-mode="${INPUT_FILTER_MODE:-added}" \
-      -fail-level="${INPUT_FAIL_LEVEL:-none}" \
-      -level="${INPUT_LEVEL}" \
-  <&3 || rd_exit=$?
-exec 3<&-
+# shellcheck disable=SC2086
+reviewdog -f=checkstyle \
+    -name="checkstyle" \
+    -reporter="${INPUT_REPORTER:-github-pr-check}" \
+    -filter-mode="${INPUT_FILTER_MODE:-added}" \
+    -fail-level="${INPUT_FAIL_LEVEL:-none}" \
+    -level="${INPUT_LEVEL}" \
+    ${INPUT_REVIEWDOG_FLAGS} < "$cs_output" || rd_exit=$?
 rd_exit=${rd_exit:-0}
 
 echo '::endgroup::'
