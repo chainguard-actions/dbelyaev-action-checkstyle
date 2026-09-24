@@ -139,25 +139,14 @@ if [ "$cs_exit" -eq 255 ] || [ "$cs_exit" -eq 254 ]; then
 fi
 
 # Feed checkstyle XML output into reviewdog; its exit code respects fail-level
-# Tokenize INPUT_REVIEWDOG_FLAGS into positional parameters using xargs so that
-# quoted sub-expressions are handled correctly and glob/word-splitting injection
-# is prevented. The checkstyle positional parameters ($@) are no longer needed
-# at this point, so we reuse set -- to hold the extra reviewdog flags.
-if [ -n "${INPUT_REVIEWDOG_FLAGS}" ]; then
-  # xargs tokenises the value (honours single/double quotes and backslashes).
-  # We use a temp file + null-delimited read to stay compatible with Alpine ash.
-  rd_flags_file="$(mktemp)"
-  trap 'rm -f "$cs_output" "$rd_flags_file"' EXIT
-  printf '%s' "${INPUT_REVIEWDOG_FLAGS}" | xargs printf '%s\0' > "$rd_flags_file"
-  set --
-  while IFS= read -r -d '' token; do
-    set -- "$@" "$token"
-  done < "$rd_flags_file"
-  rm -f "$rd_flags_file"
-else
-  set --
-fi
-
+# Tokenize INPUT_REVIEWDOG_FLAGS into positional parameters so that each flag
+# is a separate argument (word-splitting) without allowing glob expansion or
+# re-evaluation of shell metacharacters (;, |, &, $(...) are not re-parsed
+# during word splitting in POSIX sh).
+set -f  # disable glob expansion before word-splitting the flags
+# shellcheck disable=SC2086
+set -- ${INPUT_REVIEWDOG_FLAGS}
+set +f  # re-enable glob expansion
 reviewdog -f=checkstyle \
     -name="checkstyle" \
     -reporter="${INPUT_REPORTER:-github-pr-check}" \
