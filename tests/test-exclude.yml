@@ -1,0 +1,32 @@
+name: Test exclude skips excluded directories
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Verify fixtures (one clean included file, one violating excluded file)
+        run: |
+          ls -R tests/fixtures/exclude
+          test -f tests/fixtures/exclude/example/Clean.java || { echo "FAIL: missing clean fixture"; exit 1; }
+          test -f tests/fixtures/exclude/excluded/Bad.java || { echo "FAIL: missing excluded fixture"; exit 1; }
+      - id: action
+        uses: .
+        with:
+          workdir: tests/fixtures/exclude
+          reporter: local
+          filter_mode: nofilter
+          fail_level: any
+          exclude: |
+            tests/fixtures/exclude/excluded
+      - name: Assert action succeeded (violations excluded)
+        env:
+          OUTCOME: ${{ steps.action.outcome }}
+        run: |
+          echo "outcome: $OUTCOME"
+          if [ "$OUTCOME" != "success" ]; then
+            echo "FAIL: expected success because the only violating file is excluded"
+            exit 1
+          fi
+          echo "PASS"
