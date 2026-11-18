@@ -1,0 +1,28 @@
+name: Test exclude skips violating directory
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - id: action
+        uses: .
+        with:
+          workdir: tests/fixtures/java
+          checkstyle_config: tests/fixtures/checkstyle-todo.xml
+          reporter: local
+          filter_mode: nofilter
+          fail_level: any
+          exclude: |
+            tests/fixtures/java/bad
+      - name: Assert action succeeded (bad dir excluded)
+        env:
+          OUTCOME: ${{ steps.action.outcome }}
+        run: |
+          echo "outcome: $OUTCOME"
+          if [ "$OUTCOME" != "success" ]; then
+            echo "FAIL: expected success because the violating dir was excluded"
+            exit 1
+          fi
+          echo "PASS"

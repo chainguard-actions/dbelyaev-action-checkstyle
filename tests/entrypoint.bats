@@ -1,0 +1,643 @@
+#!/usr/bin/env bats
+#
+# Container-level tests for entrypoint.sh.
+#
+# These assert on what the action actually REPORTS, which the workflow-level
+# tests cannot do: those run the action with the default filter-mode 'added',
+# so reviewdog discards every violation outside the PR diff. Since testdata/
+# is untouched by a typical PR, an exclude regression there produces no
+# violations to fail on and the job passes regardless. Here we force
+# -filter-mode=nofilter with the local reporter, so every violation surfaces
+# on stdout and can be grepped.
+#
+# Scope boundary: these drive the container by setting INPUT_* directly, so
+# they do NOT exercise the action.yml input wiring - a renamed input would
+# leave this suite green. The remaining jobs in .github/workflows/test-other.yml
+# cover that mapping through `uses: ./`.
+#
+# Requires: docker, bats, and host tar and git. The image is built once and
+# the workspace copy is made once, both in setup_file: tar copies the checkout
+# and `git init` re-initialises the copy as a repository of its own. A custom
+# Check fixture is also compiled once there, in a JDK container (no host JDK).
+
+setup_file() {
+  export IMAGE="action-checkstyle-test:bats"
+  docker build -q -t "$IMAGE" "$BATS_TEST_DIRNAME/.." >/dev/null
+
+  # The container is given a self-contained COPY of the checkout, not the
+  # checkout itself.
+  #
+  # Mounting the checkout directly only works when .git is a real directory.
+  # In a git worktree it is a FILE holding "gitdir: <absolute path>" that
+  # points outside the mounted tree, so inside the container the pointer
+  # dangles, `git config --global --add safe.directory` aborts with
+  # "fatal: not a git repository: (null)", and every test that expects a
+  # successful run fails - for a reason that has nothing to do with the code
+  # under test. Reviewing a branch from a worktree is ordinary, so the suite
+  # should not fall over on it.
+  #
+  # Bind-mounting the real git directory as well would fix the pointer, but it
+  # would expose the developer's actual repository - shared by every worktree -
+  # read-write to a container. A copy costs ~200 KB, removes the dependency on
+  # how the checkout is laid out, and keeps the container from writing to the
+  # working copy at all.
+  export WORKSPACE="$BATS_FILE_TMPDIR/workspace"
+  mkdir -p "$WORKSPACE"
+  tar -C "$BATS_TEST_DIRNAME/.." --exclude=.git -cf - . | tar -C "$WORKSPACE" -xf -
+  # Re-initialise as a repo of its own: the real workspace on a runner is a git
+  # repository, so the tests should exercise that shape too.
+  git -C "$WORKSPACE" init -q
+
+  build_custom_check
+}
+
+# Compiles testdata/custom classpath/src into build/classes and
+# build/lib/custom-checks.jar inside the workspace copy, for the
+# checkstyle_classpath tests. The action image is JRE-only, so a JDK container
+# does the compiling; it compiles against the checkstyle.jar taken from the
+# image under test so the Check API always matches. It runs as the host user
+# with read-only sources so nothing root-owned is left behind for cleanup.
+build_custom_check() {
+  # Keep the Java major version in step with the JRE base image in Dockerfile.
+  # Digest-pinned; kept current by the customManagers entry in .github/renovate.json.
+  local jdk_image="eclipse-temurin:25.0.5_8-jdk-alpine@sha256:c7c3d0bdf7f2bbc5a05a6712ed334d198360105634ea9adf76fca94f381b1e3f"
+  local fixture="$WORKSPACE/testdata/custom classpath"
+  local cid rc=0
+
+  cid="$(docker create "$IMAGE")"
+  docker cp "$cid:/opt/lib/checkstyle.jar" "$BATS_FILE_TMPDIR/checkstyle.jar" >/dev/null || rc=$?
+  docker rm "$cid" >/dev/null
+  [ "$rc" -eq 0 ] || return "$rc"
+
+  mkdir -p "$fixture/build"
+  docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp \
+    -v "$fixture/src:/src:ro" \
+    -v "$BATS_FILE_TMPDIR/checkstyle.jar:/checkstyle.jar:ro" \
+    -v "$fixture/build:/build" \
+    "$jdk_image" sh -ec '
+      javac -cp /checkstyle.jar -d /build/classes $(find /src -name "*.java")
+      mkdir -p /build/lib
+      jar --create --file /build/lib/custom-checks.jar -C /build/classes .
+    ' >/dev/null
+}
+
+# Runs the action in the container against the workspace copy.
+# Usage: run_action [ENV=VALUE ...]
+run_action() {
+  local -a env_args=()
+  local kv
+  for kv in "$@"; do
+    env_args+=(-e "$kv")
+  done
+  docker run --rm \
+    -v "$WORKSPACE:/github/workspace" \
+    -e GITHUB_WORKSPACE=/github/workspace \
+    -e INPUT_REPORTER=local \
+    -e INPUT_FILTER_MODE=nofilter \
+    -e INPUT_FAIL_LEVEL=none \
+    -e INPUT_LEVEL=info \
+    -e INPUT_WORKDIR=/github/workspace/testdata/java \
+    -e INPUT_CHECKSTYLE_CONFIG=google_checks.xml \
+    "${env_args[@]}" \
+    "$IMAGE" 2>&1
+}
+
+# --- fixture sanity -----------------------------------------------------
+# Without this the exclude tests below could pass vacuously: if the fixture
+# stopped producing violations, "not found in output" would be trivially true.
+
+@test "fixture: excluded files DO produce violations when not excluded" {
+  run run_action
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"ExcludedFile.java"* ]]
+  [[ "$output" == *"SpaceExcluded.java"* ]]
+  [[ "$output" == *"AnotherExcluded.java"* ]]
+}
+
+@test "fixture: the non-excluded file always produces violations" {
+  run run_action
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Application.java"* ]]
+}
+
+# --- exclude ------------------------------------------------------------
+
+@test "exclude: an excluded directory is not analyzed" {
+  run run_action "INPUT_EXCLUDE=testdata/java/excluded"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"ExcludedFile.java"* ]]
+  # unrelated files must still be analyzed
+  [[ "$output" == *"Application.java"* ]]
+}
+
+@test "exclude: subdirectories of an excluded directory are excluded too" {
+  run run_action "INPUT_EXCLUDE=testdata/java/excluded"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"AnotherExcluded.java"* ]]
+}
+
+@test "exclude: a directory name containing a space is excluded" {
+  run run_action "INPUT_EXCLUDE=testdata/java/excluded dir"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"SpaceExcluded.java"* ]]
+  [[ "$output" == *"Application.java"* ]]
+}
+
+@test "exclude: multiple newline-separated entries all apply" {
+  run run_action "INPUT_EXCLUDE=testdata/java/excluded
+testdata/java/excluded dir"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"ExcludedFile.java"* ]]
+  [[ "$output" != *"AnotherExcluded.java"* ]]
+  [[ "$output" != *"SpaceExcluded.java"* ]]
+  [[ "$output" == *"Application.java"* ]]
+}
+
+@test "exclude: entries are whitespace-trimmed" {
+  run run_action "INPUT_EXCLUDE=   testdata/java/excluded   "
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"ExcludedFile.java"* ]]
+}
+
+@test "exclude: a path that does not exist is tolerated, not fatal" {
+  run run_action "INPUT_EXCLUDE=testdata/java/does-not-exist-yet"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Application.java"* ]]
+}
+
+# --- properties_file ----------------------------------------------------
+
+@test "properties_file: a variable from the file is resolved into the config" {
+  # max-line-length=50 makes Application.java's long line a violation;
+  # without the properties file Checkstyle cannot resolve ${max-line-length}
+  # and fails, so seeing a LineLength violation proves substitution happened.
+  run run_action \
+    "INPUT_CHECKSTYLE_CONFIG=/github/workspace/testdata/properties_file/test_checks.xml" \
+    "INPUT_PROPERTIES_FILE=/github/workspace/testdata/properties_file/additional.properties"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Line is longer than 50"* ]]
+}
+
+@test "properties_file: omitting it when the config needs a variable fails loudly" {
+  run run_action \
+    "INPUT_CHECKSTYLE_CONFIG=/github/workspace/testdata/properties_file/test_checks.xml"
+  [ "$status" -ne 0 ]
+}
+
+# --- checkstyle_classpath -----------------------------------------------
+# custom_checks.xml is not at the workspace root, so Checkstyle can only find
+# it through the classpath resource lookup - seeing its custom message proves
+# the input reached the JVM. The space in the directory name guards against
+# an unquoted classpath.
+
+@test "checkstyle_classpath: a ruleset on the extra classpath is loaded" {
+  run run_action \
+    "INPUT_CHECKSTYLE_CLASSPATH=testdata/custom classpath" \
+    "INPUT_CHECKSTYLE_CONFIG=custom_checks.xml"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Custom classpath rule was loaded"* ]]
+}
+
+@test "checkstyle_classpath: the same ruleset is not found without it" {
+  run run_action "INPUT_CHECKSTYLE_CONFIG=custom_checks.xml"
+  [ "$status" -ne 0 ]
+  [[ "$output" != *"Custom classpath rule was loaded"* ]]
+}
+
+# The tests below load a real Check class compiled in setup_file. The config
+# references com.example.checks.MarkerCheck, which exists only in build/.
+#
+# Checkstyle's own error text is not observable in the output (it goes to the
+# discarded XML stream), so negative tests cannot tell "class missing" from any
+# other config error by message. The positive tests use the very same config,
+# which is what rules out a broken config as the cause of those failures.
+
+@test "checkstyle_classpath: a custom Check class in a JAR is loaded" {
+  run run_action \
+    "INPUT_CHECKSTYLE_CLASSPATH=testdata/custom classpath/build/lib/custom-checks.jar" \
+    "INPUT_CHECKSTYLE_CONFIG=/github/workspace/testdata/custom classpath/config/custom_class_checks.xml"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Custom check class was loaded"* ]]
+}
+
+@test "checkstyle_classpath: a custom Check class in a class directory is loaded" {
+  run run_action \
+    "INPUT_CHECKSTYLE_CLASSPATH=testdata/custom classpath/build/classes" \
+    "INPUT_CHECKSTYLE_CONFIG=/github/workspace/testdata/custom classpath/config/custom_class_checks.xml"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Custom check class was loaded"* ]]
+}
+
+@test "checkstyle_classpath: a custom Check class cannot load without it" {
+  run run_action \
+    "INPUT_CHECKSTYLE_CONFIG=/github/workspace/testdata/custom classpath/config/custom_class_checks.xml"
+  [ "$status" -ne 0 ]
+  [[ "$output" != *"Custom check class was loaded"* ]]
+}
+
+@test "checkstyle_classpath: colon-separated entries are all used" {
+  # The config is found only via the first entry, the class only via the second.
+  run run_action \
+    "INPUT_CHECKSTYLE_CLASSPATH=testdata/custom classpath/config:testdata/custom classpath/build/lib/custom-checks.jar" \
+    "INPUT_CHECKSTYLE_CONFIG=custom_class_checks.xml"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Custom check class was loaded"* ]]
+}
+
+@test "checkstyle_classpath: the config entry alone is not enough" {
+  run run_action \
+    "INPUT_CHECKSTYLE_CLASSPATH=testdata/custom classpath/config" \
+    "INPUT_CHECKSTYLE_CONFIG=custom_class_checks.xml"
+  [ "$status" -ne 0 ]
+  [[ "$output" != *"Custom check class was loaded"* ]]
+}
+
+@test "checkstyle_classpath: the JAR entry alone is not enough" {
+  run run_action \
+    "INPUT_CHECKSTYLE_CLASSPATH=testdata/custom classpath/build/lib/custom-checks.jar" \
+    "INPUT_CHECKSTYLE_CONFIG=custom_class_checks.xml"
+  [ "$status" -ne 0 ]
+  [[ "$output" != *"Custom check class was loaded"* ]]
+}
+
+@test "checkstyle_classpath: a dir/* wildcard picks up the JARs in it" {
+  # Must reach the JVM unexpanded; the JVM, not the shell, expands it.
+  run run_action \
+    "INPUT_CHECKSTYLE_CLASSPATH=testdata/custom classpath/build/lib/*" \
+    "INPUT_CHECKSTYLE_CONFIG=/github/workspace/testdata/custom classpath/config/custom_class_checks.xml"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Custom check class was loaded"* ]]
+}
+
+@test "checkstyle_classpath: an absolute path entry is accepted" {
+  run run_action \
+    "INPUT_CHECKSTYLE_CLASSPATH=/github/workspace/testdata/custom classpath/build/lib/custom-checks.jar" \
+    "INPUT_CHECKSTYLE_CONFIG=/github/workspace/testdata/custom classpath/config/custom_class_checks.xml"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Custom check class was loaded"* ]]
+}
+
+# An empty entry would put the workspace root on the classpath. 'leak-marker'
+# in the values checks that the rejected input is not echoed to the log.
+
+@test "checkstyle_classpath: empty entries are rejected before analysis" {
+  local value
+  for value in ":" ":leak-marker" "leak-marker:" "leak-marker::other"; do
+    run run_action "INPUT_CHECKSTYLE_CLASSPATH=$value"
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"Invalid checkstyle_classpath: empty entry"* ]]
+    [[ "$output" != *"leak-marker"* ]]
+    [[ "$output" != *"Run check with"* ]]
+  done
+}
+
+@test "checkstyle_classpath: rejection happens before a custom version downloads" {
+  run run_action "INPUT_CHECKSTYLE_CLASSPATH=a::b" "INPUT_CHECKSTYLE_VERSION=10.21.0"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"Invalid checkstyle_classpath"* ]]
+  [[ "$output" != *"Installing user-defined Checkstyle version"* ]]
+}
+
+@test "checkstyle_classpath: an explicitly empty value is accepted" {
+  run run_action "INPUT_CHECKSTYLE_CLASSPATH="
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Application.java"* ]]
+}
+
+# --- failure modes ------------------------------------------------------
+
+@test "invalid checkstyle config fails with a non-zero exit code" {
+  run run_action "INPUT_CHECKSTYLE_CONFIG=nonexistent_config.xml"
+  [ "$status" -ne 0 ]
+}
+
+# --- Checkstyle exit-code handling --------------------------------------
+# Checkstyle exits with the NUMBER of error-severity violations, which
+# collides with 254 (internal exception) and 255 (invalid arguments). The
+# entrypoint distinguishes the two cases by whether usable XML was produced;
+# nothing tested that branch until now.
+
+@test "exit code 254 with valid XML is forwarded, not treated as a hard failure" {
+  # The fixture is generated to produce exactly 254 error-severity violations,
+  # so Checkstyle exits 254 while writing a perfectly good report. Aborting
+  # here would drop a full set of findings on the floor.
+  run run_action \
+    "INPUT_WORKDIR=/github/workspace/testdata/exit_codes/src" \
+    "INPUT_CHECKSTYLE_CONFIG=/github/workspace/testdata/exit_codes/checks.xml"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"Checkstyle failed with exit code"* ]]
+  [[ "$output" == *"ExactlyTwoFiftyFour.java"* ]]
+}
+
+@test "a Checkstyle failure without usable XML aborts with its exit code" {
+  # The other side of the same branch: a missing config makes Checkstyle exit
+  # 255 and write a plain-text error where the XML would be, which must abort.
+  run run_action "INPUT_CHECKSTYLE_CONFIG=/github/workspace/no-such-config.xml"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"Checkstyle failed with exit code"* ]]
+}
+
+@test "nonexistent workdir fails with a clear message" {
+  run run_action "INPUT_WORKDIR=/github/workspace/no/such/dir"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"workdir does not exist"* ]]
+}
+
+# --- workdir defaulting -------------------------------------------------
+# action.yml declares default "." but GitHub only substitutes a default for an
+# OMITTED input, so an explicit `workdir: ""` reaches the script. Every other
+# test here passes an absolute path, so neither the documented default nor the
+# relative form had any container-level coverage.
+
+@test "workdir: an empty value falls back to the workspace root" {
+  run run_action "INPUT_WORKDIR="
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Application.java"* ]]
+}
+
+@test "workdir: the action.yml default '.' resolves to the workspace root" {
+  run run_action "INPUT_WORKDIR=."
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Application.java"* ]]
+}
+
+@test "workdir: a relative sub-path resolves against the workspace" {
+  run run_action "INPUT_WORKDIR=testdata/java"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Application.java"* ]]
+}
+
+# --- reviewdog input defaults -------------------------------------------
+
+@test "defaults: an empty level falls back to info" {
+  # Previously emitted a bare `-level=` to reviewdog.
+  run run_action "INPUT_LEVEL="
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Application.java"* ]]
+}
+
+@test "defaults: an empty fail_level falls back to none" {
+  run run_action "INPUT_FAIL_LEVEL="
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Application.java"* ]]
+}
+
+@test "defaults: an empty filter_mode falls back to added" {
+  # Non-vacuous: the default is applied BEFORE the enum check below, so without
+  # it the empty value falls through to `*)` and is rejected by name.
+  #
+  # Unlike the two tests above this one does not end in a clean run: `added` is
+  # diff-based, and the local reporter has no diff command here, so reviewdog
+  # stops with "diff command is empty". That message is the assertion - it is
+  # what a diff-based filter mode does and what `nofilter` would NOT do, so it
+  # pins the applied default rather than merely "some accepted value". An
+  # explicit INPUT_FILTER_MODE=added produces the identical output.
+  run run_action "INPUT_FILTER_MODE="
+  [ "$status" -ne 0 ]
+  [[ "$output" != *"Invalid filter_mode"* ]]
+  [[ "$output" == *"reviewdog: diff command is empty"* ]]
+}
+
+# --- enum input validation ----------------------------------------------
+# Asserting only a non-zero status would pass WITHOUT the guard: reviewdog
+# already rejects a bogus value, just later and far less clearly. The message
+# assertion is what proves the entrypoint rejected it up front.
+#
+# reporter is not validated - see the comment in entrypoint.sh - so there is
+# deliberately no test for it here.
+
+@test "input validation: an unknown level is rejected" {
+  run run_action "INPUT_LEVEL=bogus"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"Invalid level: 'bogus'"* ]]
+}
+
+@test "input validation: an unknown filter_mode is rejected" {
+  run run_action "INPUT_FILTER_MODE=bogus"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"Invalid filter_mode: 'bogus'"* ]]
+}
+
+@test "input validation: an unknown fail_level is rejected" {
+  run run_action "INPUT_FAIL_LEVEL=bogus"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"Invalid fail_level: 'bogus'"* ]]
+}
+
+@test "input validation: enum matching is case-sensitive" {
+  # reviewdog wants lowercase; accepting INFO would mean deciding whether to
+  # fold case, which this guard deliberately does not do.
+  run run_action "INPUT_LEVEL=INFO"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"Invalid level: 'INFO'"* ]]
+}
+
+@test "input validation: a valid level is accepted" {
+  # Guards against an allowlist so strict it rejects documented values.
+  run run_action "INPUT_LEVEL=warning"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"Invalid level"* ]]
+  [[ "$output" == *"Application.java"* ]]
+}
+
+@test "input validation: a valid filter_mode is accepted" {
+  run run_action "INPUT_FILTER_MODE=nofilter"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"Invalid filter_mode"* ]]
+  [[ "$output" == *"Application.java"* ]]
+}
+
+@test "input validation: a valid fail_level is accepted" {
+  # fail_level=any fires on the warnings google_checks reports, so a non-zero
+  # status here is the ACCEPTED path, not a rejection.
+  run run_action "INPUT_FAIL_LEVEL=any"
+  [ "$status" -ne 0 ]
+  [[ "$output" != *"Invalid fail_level"* ]]
+}
+
+@test "input validation: rejection happens before Checkstyle runs" {
+  run run_action "INPUT_FAIL_LEVEL=bogus"
+  [ "$status" -ne 0 ]
+  [[ "$output" != *"Run check with"* ]]
+}
+
+@test "input validation: rejection happens before a custom version downloads" {
+  # Pins the placement decision: the guards sit above the custom-version
+  # block, so a typo costs nothing instead of a ~17 MB JAR fetch.
+  run run_action "INPUT_FAIL_LEVEL=bogus" "INPUT_CHECKSTYLE_VERSION=10.21.0"
+  [ "$status" -ne 0 ]
+  [[ "$output" != *"Installing user-defined Checkstyle version"* ]]
+}
+
+# --- checkstyle_version validation --------------------------------------
+
+@test "version validation: path traversal in the version is rejected" {
+  # Without validation this rewrites the download URL to an arbitrary path on
+  # github.com, and the fetched JAR is then executed by `java -jar`.
+  run run_action "INPUT_CHECKSTYLE_VERSION=../../../../../../attacker/repo/releases/download/v1/evil.jar?"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"Invalid checkstyle_version"* ]]
+  # must be rejected before any download is attempted
+  [[ "$output" != *"Failed to download"* ]]
+}
+
+@test "version validation: shell metacharacters are rejected" {
+  run run_action 'INPUT_CHECKSTYLE_VERSION=10.0;id'
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"Invalid checkstyle_version"* ]]
+}
+
+@test "version validation: whitespace-bearing values are rejected" {
+  run run_action "INPUT_CHECKSTYLE_VERSION=10.0 --no-check-certificate"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"Invalid checkstyle_version"* ]]
+}
+
+@test "version validation: a leading, trailing or doubled dot is rejected" {
+  run run_action "INPUT_CHECKSTYLE_VERSION=.10.0"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"Invalid checkstyle_version"* ]]
+
+  run run_action "INPUT_CHECKSTYLE_VERSION=10.0."
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"Invalid checkstyle_version"* ]]
+
+  run run_action "INPUT_CHECKSTYLE_VERSION=10..0"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"Invalid checkstyle_version"* ]]
+}
+
+@test "version validation: a well-formed version passes validation and downloads" {
+  # Guards against the pattern being so strict it rejects real versions.
+  # The classpath rides along to prove it survives the JAR being replaced.
+  run run_action "INPUT_CHECKSTYLE_VERSION=10.21.0" \
+    "INPUT_CHECKSTYLE_CLASSPATH=testdata/custom classpath" \
+    "INPUT_CHECKSTYLE_CONFIG=custom_checks.xml"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"Invalid checkstyle_version"* ]]
+  [[ "$output" == *"Checkstyle version: 10.21.0"* ]]
+  [[ "$output" == *"Custom classpath rule was loaded"* ]]
+}
+
+@test "version validation: a well-formed but nonexistent version fails at download" {
+  # 999.0.0 is valid syntax, so it must pass validation and fail later -
+  # proving the check rejects shape, not existence.
+  run run_action "INPUT_CHECKSTYLE_VERSION=999.0.0"
+  [ "$status" -ne 0 ]
+  [[ "$output" != *"Invalid checkstyle_version"* ]]
+  [[ "$output" == *"Failed to download Checkstyle version"* ]]
+}
+
+# --- fail_level ---------------------------------------------------------
+
+@test "fail_level=none succeeds even though violations exist" {
+  run run_action "INPUT_FAIL_LEVEL=none"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Application.java"* ]]
+}
+
+@test "fail_level=warning fails when warning-level violations are reported" {
+  # google_checks.xml reports at severity "warning" (its Checker sets
+  # severity=warning globally), so this - not fail_level=error - is what
+  # actually trips on this fixture. See the note above test-exclude in
+  # .github/workflows/test-other.yml: a fail_level of "error" cannot fire
+  # with this ruleset no matter what the analysis finds.
+  run run_action "INPUT_FAIL_LEVEL=warning"
+  [ "$status" -ne 0 ]
+}
+
+@test "fail_level=error does not fire on a warning-severity ruleset" {
+  # Documents the trap rather than asserting a desirable behaviour: with
+  # google_checks.xml every violation is a warning, so fail_level=error
+  # passes even though the code is full of findings.
+  run run_action "INPUT_FAIL_LEVEL=error"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Application.java"* ]]
+}
+
+# --- reviewdog_flags ----------------------------------------------------
+
+@test "reviewdog_flags: extra flags reach reviewdog and take effect" {
+  # The flags are expanded unquoted on purpose (word splitting is required to
+  # pass several flags); this pins that the expansion actually works.
+  run run_action "INPUT_REVIEWDOG_FLAGS=-fail-level=warning"
+  [ "$status" -ne 0 ]
+}
+
+@test "reviewdog_flags: empty by default and harmless" {
+  run run_action "INPUT_REVIEWDOG_FLAGS="
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Application.java"* ]]
+}
+
+@test "reviewdog_flags: several flags are split into separate arguments" {
+  # The test above passes a SINGLE flag, so it would stay green if someone
+  # "fixed" SC2086 by quoting the expansion. Two flags actually pin splitting:
+  # collapsed into one word, reviewdog sees a -fail-level value of
+  # "none -filter-mode=nofilter" and rejects it.
+  run run_action "INPUT_REVIEWDOG_FLAGS=-fail-level=none -filter-mode=nofilter"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Application.java"* ]]
+}
+
+@test "reviewdog_flags: globbing stays disabled across the flags expansion" {
+  # The expansion is unquoted so several flags can be passed, but the cwd is
+  # GITHUB_WORKSPACE, whose contents a PR author controls, so a standalone
+  # pattern would otherwise expand against repository files. `set -f` keeps it
+  # literal.
+  #
+  # Both runs fail - reviewdog rejects the unknown flag either way - but the
+  # flag NAME in its error says which word it actually received:
+  #   guard present: "flag provided but not defined: -*"
+  #   guard removed: "flag provided but not defined: -globbed"
+  #
+  # An earlier probe used "-tee *.md". Its expansion lands in POSITIONAL
+  # arguments, which reviewdog silently ignores, so it passed against the
+  # unpatched entrypoint and proved nothing. A pattern that expands into a
+  # FLAG does not have that problem.
+  #
+  # (A pattern must be its OWN word to expand at all: globbing applies to the
+  # whole word, so "-name=*.md" only matches a file literally called that.)
+  touch "$WORKSPACE/-globbed"
+
+  run run_action "INPUT_REVIEWDOG_FLAGS=-*"
+
+  rm -f "$WORKSPACE/-globbed"
+
+  [[ "$output" != *"-globbed"* ]]
+  [[ "$output" == *"flag provided but not defined: -*"* ]]
+}
+
+# --- privilege drop -----------------------------------------------------
+
+@test "drops root: analysis runs as the workspace owner (non-root workspace)" {
+  # The container starts as root and su-exec's to the UID owning the
+  # bind-mounted workspace. If that switch broke, HOME would still point at
+  # the root-owned /github/home and reviewdog could not write; assert the
+  # run completes and reports normally.
+  run run_action
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Application.java"* ]]
+}
+
+@test "drops root: a root-owned workspace falls back to the checkstyle user" {
+  # Named volumes are root-owned, which exercises the branch where the
+  # workspace owner is UID 0 and the entrypoint must fall back to its own
+  # non-root user rather than staying root.
+  local vol="bats-root-owned-$$"
+  docker volume create "$vol" >/dev/null
+  run docker run --rm \
+    -v "$vol:/github/workspace" \
+    -v "$WORKSPACE:/repo:ro" \
+    -e GITHUB_WORKSPACE=/github/workspace \
+    -e INPUT_REPORTER=local \
+    -e INPUT_FILTER_MODE=nofilter \
+    -e INPUT_FAIL_LEVEL=none \
+    -e INPUT_LEVEL=info \
+    -e INPUT_WORKDIR=/repo/testdata/java \
+    -e INPUT_CHECKSTYLE_CONFIG=google_checks.xml \
+    "$IMAGE" 2>&1
+  docker volume rm "$vol" >/dev/null
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Application.java"* ]]
+}
