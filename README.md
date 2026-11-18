@@ -37,6 +37,7 @@ Hardened by [Chainguard](https://www.chainguard.dev) from the upstream action at
 | v4.5.0 | [`v4.5.0`](https://github.com/chainguard-actions/dbelyaev-action-checkstyle/tree/v4.5.0) | [`3184378`](https://github.com/dbelyaev/action-checkstyle/commit/31843784e30f5135d3e1c786b73f915e2e2708f2) | [`HARDENING.md`](https://github.com/chainguard-actions/dbelyaev-action-checkstyle/blob/v4.5.0/HARDENING.md) |
 | v4.6.0 | [`v4.6.0`](https://github.com/chainguard-actions/dbelyaev-action-checkstyle/tree/v4.6.0) | [`0265ee4`](https://github.com/dbelyaev/action-checkstyle/commit/0265ee4bad18835a7d35bcf1e869705f3734b100) | [`HARDENING.md`](https://github.com/chainguard-actions/dbelyaev-action-checkstyle/blob/v4.6.0/HARDENING.md) |
 | v4.7.0 | [`v4.7.0`](https://github.com/chainguard-actions/dbelyaev-action-checkstyle/tree/v4.7.0) | [`80d6f05`](https://github.com/dbelyaev/action-checkstyle/commit/80d6f05fe79a0f9a4bd8f678333aed0cccb5f9e6) | [`HARDENING.md`](https://github.com/chainguard-actions/dbelyaev-action-checkstyle/blob/v4.7.0/HARDENING.md) |
+| v4.7.1 | [`v4.7.1`](https://github.com/chainguard-actions/dbelyaev-action-checkstyle/tree/v4.7.1) | [`29033e5`](https://github.com/dbelyaev/action-checkstyle/commit/29033e5cb5374c366d720732c5a7ff81203f022d) | [`HARDENING.md`](https://github.com/chainguard-actions/dbelyaev-action-checkstyle/blob/v4.7.1/HARDENING.md) |
 
 ## Privacy
 
